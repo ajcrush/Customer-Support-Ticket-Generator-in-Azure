@@ -1,0 +1,186 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "workflows_SupportTicketLogicApp_name": {
+            "defaultValue": "SupportTicketLogicApp",
+            "type": "String"
+        },
+        "connections_microsoftforms_externalid": {
+            "defaultValue": "/subscriptions/ae7ce25b-26ef-4f77-9a15-d04135fad00a/resourceGroups/TicketingSystem-RG/providers/Microsoft.Web/connections/microsoftforms",
+            "type": "String"
+        },
+        "connections_azuretables_externalid": {
+            "defaultValue": "/subscriptions/ae7ce25b-26ef-4f77-9a15-d04135fad00a/resourceGroups/TicketingSystem-RG/providers/Microsoft.Web/connections/azuretables",
+            "type": "String"
+        },
+        "connections_outlook_externalid": {
+            "defaultValue": "/subscriptions/ae7ce25b-26ef-4f77-9a15-d04135fad00a/resourceGroups/TicketingSystem-RG/providers/Microsoft.Web/connections/outlook",
+            "type": "String"
+        }
+    },
+    "variables": {},
+    "resources": [
+        {
+            "type": "Microsoft.Logic/workflows",
+            "apiVersion": "2017-07-01",
+            "name": "[parameters('workflows_SupportTicketLogicApp_name')]",
+            "location": "northcentralus",
+            "properties": {
+                "state": "Enabled",
+                "definition": {
+                    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+                    "contentVersion": "1.0.0.0",
+                    "parameters": {
+                        "$connections": {
+                            "defaultValue": {},
+                            "type": "Object"
+                        }
+                    },
+                    "triggers": {
+                        "When_a_new_response_is_submitted": {
+                            "splitOn": "@triggerBody()?['value']",
+                            "type": "ApiConnectionWebhook",
+                            "inputs": {
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['microsoftforms']['connectionId']"
+                                    }
+                                },
+                                "body": {
+                                    "eventType": "responseAdded",
+                                    "notificationUrl": "@listCallbackUrl()",
+                                    "source": "ms-connector"
+                                },
+                                "path": "/formapi/api/forms/@{encodeURIComponent('7Yu9NMEqrkGfCE4KPxFwbMvKuKucCVxAj-otyGXi5aJUMlVNVkQzUUNHWUdHMUdUTjQ5OUxIN05LWi4u')}/webhooks"
+                            }
+                        }
+                    },
+                    "actions": {
+                        "Get_response_details": {
+                            "runAfter": {},
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['microsoftforms']['connectionId']"
+                                    }
+                                },
+                                "method": "get",
+                                "path": "/formapi/api/forms('@{encodeURIComponent('7Yu9NMEqrkGfCE4KPxFwbMvKuKucCVxAj-otyGXi5aJUMlVNVkQzUUNHWUdHMUdUTjQ5OUxIN05LWi4u')}')/responses",
+                                "queries": {
+                                    "response_id": "@triggerBody()?['resourceData']?['responseId']"
+                                }
+                            }
+                        },
+                        "Initialize_variable": {
+                            "runAfter": {
+                                "Get_response_details": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "TicketID",
+                                        "type": "string",
+                                        "value": "TICKET-@{utcNow('yyyyMMddHHmmss')}"
+                                    }
+                                ]
+                            }
+                        },
+                        "Initialize_variable_1": {
+                            "runAfter": {
+                                "Initialize_variable": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "InitializeVariable",
+                            "inputs": {
+                                "variables": [
+                                    {
+                                        "name": "AssignedAgent",
+                                        "type": "string",
+                                        "value": "Agent1"
+                                    }
+                                ]
+                            }
+                        },
+                        "Insert_Entity_(V2)": {
+                            "runAfter": {
+                                "Initialize_variable_1": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['azuretables']['connectionId']"
+                                    }
+                                },
+                                "method": "post",
+                                "body": {
+                                    "PartitionKey": "Support",
+                                    "RowKey": "@{variables('TicketID')}",
+                                    "CustomerName": "@{outputs('Get_response_details')?['body/r1d2b9a22d45346d39d2a570ab6c47b69']}",
+                                    "Email": "@{outputs('Get_response_details')?['body/r8c86f0d1b8ff43b097623e716166881e']}",
+                                    "IssueDescription": "@{outputs('Get_response_details')?['body/r68887010d24743a08cb87c3de185522e']}",
+                                    "AssignedAgent": "@{variables('AssignedAgent')}",
+                                    "Status": "Open",
+                                    "CreatedAt": "@{utcNow()}"
+                                },
+                                "path": "/v2/storageAccounts/@{encodeURIComponent(encodeURIComponent('AccountNameFromSettings'))}/tables/@{encodeURIComponent('tickets')}/entities"
+                            }
+                        },
+                        "Send_an_email_(V2)": {
+                            "runAfter": {
+                                "Insert_Entity_(V2)": [
+                                    "Succeeded"
+                                ]
+                            },
+                            "type": "ApiConnection",
+                            "inputs": {
+                                "host": {
+                                    "connection": {
+                                        "name": "@parameters('$connections')['outlook']['connectionId']"
+                                    }
+                                },
+                                "method": "post",
+                                "body": {
+                                    "To": "mohitanand8987@gmail.com",
+                                    "Subject": "Your Support Ticket [@{variables('TicketID')}] has been received",
+                                    "Body": "<p class=\"editor-paragraph\">Hello @{outputs('Get_response_details')?['body/r1d2b9a22d45346d39d2a570ab6c47b69']}<br><br>We have received your support request.<br><br>Ticket ID: @{variables('TicketID')}<br>Issue Description: @{outputs('Get_response_details')?['body/r68887010d24743a08cb87c3de185522e']}<br>Assigned Agent: @{variables('AssignedAgent')}<br>Status: Open<br><br>We will get back to you as soon as possible.<br><br>Regards,<br>Support Team</p>"
+                                },
+                                "path": "/v2/Mail"
+                            }
+                        }
+                    },
+                    "outputs": {}
+                },
+                "parameters": {
+                    "$connections": {
+                        "value": {
+                            "microsoftforms": {
+                                "id": "/subscriptions/ae7ce25b-26ef-4f77-9a15-d04135fad00a/providers/Microsoft.Web/locations/northcentralus/managedApis/microsoftforms",
+                                "connectionId": "[parameters('connections_microsoftforms_externalid')]",
+                                "connectionName": "microsoftforms"
+                            },
+                            "azuretables": {
+                                "id": "/subscriptions/ae7ce25b-26ef-4f77-9a15-d04135fad00a/providers/Microsoft.Web/locations/northcentralus/managedApis/azuretables",
+                                "connectionId": "[parameters('connections_azuretables_externalid')]",
+                                "connectionName": "azuretables"
+                            },
+                            "outlook": {
+                                "id": "/subscriptions/ae7ce25b-26ef-4f77-9a15-d04135fad00a/providers/Microsoft.Web/locations/northcentralus/managedApis/outlook",
+                                "connectionId": "[parameters('connections_outlook_externalid')]",
+                                "connectionName": "outlook"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    ]
+}
